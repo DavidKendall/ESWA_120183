@@ -21,7 +21,7 @@ function agent_perimeter_status(b, parameters; n_steps=500, boundary=50)
 end
 
 function knn_d(k, mag, cb, p, perim_pair, nbr_mag)
-    n_agents, max_n = size(nbr_mag)
+    n_agents = size(nbr_mag)[1]
     nbr_mag .= 0.
     Threads.@threads for i in 1:n_agents
         n = 0
@@ -51,7 +51,7 @@ function knn_mean_distances(b, parameters; n_steps=500, class_ids=[:ii, :pi, :pp
     end
     for i in 1:n_steps
         n_agents = size(b)[1]
-        xv, yv, mag, p = compute_step(b; parameters...)
+        _, _, mag, p = compute_step(b; parameters...)
         if perimeter !== nothing
             p = perimeter
         end
@@ -67,7 +67,7 @@ function knn_mean_distances(b, parameters; n_steps=500, class_ids=[:ii, :pi, :pp
             stds[i, cn] = s
         end
         apply_step(b)
-        if failure != nothing && i == f_step
+        if failure !== nothing && i == f_step
             b_ = [b[a,:] for a in 1:n_agents if a ∉ failed]
             b = collect(transpose(reshape(collect(Iterators.flatten(b_)),(SM.N_COLS, n_agents - length(failed)))))
         end

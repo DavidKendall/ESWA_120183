@@ -12,8 +12,8 @@ const REP_X = 5
 const REP_Y = 6
 const DIR_X = 7
 const DIR_Y = 8
-const ADV_X = 9
-const ADV_Y = 10
+const ROT_X = 9
+const ROT_Y = 10
 const RES_X = 11
 const RES_Y = 12
 const GOAL_X = 13
@@ -36,8 +36,6 @@ const default_swarm_params =
         :kg => 0.0,
         :ka => [0.0, 0.0],
         :ra => [0.0, 0.0],
-        :scaling => "linear",
-        :exp_rate => 0.2,
         :stability_factor => 0.0,
         :rgf => false,
         :speed => 0.05,
@@ -187,40 +185,11 @@ function compute_dir(b, kd, p)
     b[:, DIR_X:DIR_Y] .= kd[p] .* (b[:, GOAL_X:GOAL_Y] .- b[:, POS_X:POS_Y])
 end
 
-function compute_adv(b, ka, α, p)
-    # nd = transpose(reshape(collect(Iterators.flatten(safe_unit.([b[i,DIR_X:DIR_Y] for i in 1:size(b)[1]]))), (2,size(b)[1])))
-    # nd = b[:,DIR_X:DIR_Y] ./ sqrt.(b[:,DIR_X] .^ 2 .+ b[:,DIR_Y] .^ 2)
+function compute_rot(b, ka, α, p)
     nd = b[:,DIR_X:DIR_Y] ./ hypot.(b[:,DIR_X], b[:,DIR_Y])
-    # nd = normalize(b[:,DIR_X:DIR_Y])
-    b[:, ADV_X] .= ka[p] .* (cos.(α[p]) .* nd[:,1] .- sin.(α[p]) .* nd[:,2])
-    b[:, ADV_Y] .= ka[p] .* (sin.(α[p]) .* nd[:,1] .+ cos.(α[p]) .* nd[:,2])
+    b[:, ROT_X] .= ka[p] .* (cos.(α[p]) .* nd[:,1] .- sin.(α[p]) .* nd[:,2])
+    b[:, ROT_Y] .= ka[p] .* (sin.(α[p]) .* nd[:,1] .+ cos.(α[p]) .* nd[:,2])
 end
-#
-# function compute_adv(b, ka, α, p)
-#     n_agents = size(b)[1]
-#     for i in 1:n_agents
-#         mag_dir = √(b[i,DIR_X]^2 + b[i,DIR_Y]^2)
-#         if mag_dir > 0.0
-#             nd = b[i,DIR_X:DIR_Y] / mag_dir
-#             b[i, ADV_X] = ka[p[i]] * (cos(α[p[i]]) * nd[1] - sin(α[p[i]]) * nd[2])
-#             b[i, ADV_Y] = ka[p[i]] * (sin(α[p[i]]) * nd[1] + cos(α[p[i]]) * nd[2])
-#         else
-#             b[i, ADV_X:ADV_Y] = [0 0]
-#         end
-#     end
-# end
-
-# function update_resultant(b, stability_factor, speed)
-#     n_agents = size(b)[1]
-#     for i in 1:n_agents
-#         mag_res = √(b[i, RES_X]^2 + b[i, RES_Y]^2)
-#         if mag_res > 1.0
-#             b[i, RES_X:RES_Y] .*= speed / mag_res
-#         else
-#             b[i, RES_X:RES_Y] .*= speed
-#         end
-#     end
-# end
 
 function update_resultant(b, stability_factor, speed)
     n_agents = size(b)[1]
@@ -236,19 +205,24 @@ function update_resultant(b, stability_factor, speed)
     end
 end
 
-function compute_step(b; scaling = "linear", exp_rate = 0.2, speed = 0.05, stability_factor = 0.0,
+function compute_step(b; speed = 0.05, stability_factor = 0.0,
                       cb = 3.0, rb = Array{Float64,2}([2.0 2.0; 2.0 2.0]), 
                       kc = Array{Float64,2}([0.15 0.15; 0.15 0.15]), 
                       kr = Array{Float64,2}([50.0 50.0; 50.0 50.0]), kd = [0.0, 0.0], 
                       ka = [0.0, 0.0], ra = [0.0, 0.0], kg = 0.0, rgf = false,
                       gain = nothing)
+
+    # compute the distance between all pairs of agents
     xv, yv, mag = all_pairs_mag(b, cb)
 
+    # compute the perimeter agents and gap-filling vectors
     p = on_perim(b, xv, yv, mag, cb, kg, rgf)
 
+    # compute the cohesion vectors
     compute_coh(b, xv, yv, mag, cb, kc, p)
     b[:, COH_X:COH_Y] ./= max.(b[:, COH_N], 1.0)
 
+    # compute the repulsion vectors
     compute_rep_linear(b, xv, yv, mag, rb, kr, p)
     b[:, REP_X:REP_Y] ./= max.(b[:, REP_N], 1.0)
 
@@ -258,14 +232,16 @@ function compute_step(b; scaling = "linear", exp_rate = 0.2, speed = 0.05, stabi
     else
         compute_dir(b, kd, p)
     end
+
     #compute the rotation vectors
     if ka == [0.0, 0.0]
-        b[:,ADV_X:ADV_Y] .= [0.0 0.0]
+        b[:,ROT_X:ROT_Y] .= [0.0 0.0]
     else
-        compute_adv(b, ka, ra, p)
+        compute_rot(b, ka, ra, p)
     end
+
     # compute the resultant of the cohesion, gap, repulsion, direction and rotation vectors
-    b[:, RES_X:RES_Y] = b[:, COH_X:COH_Y] .+ b[:, GAP_X:GAP_Y] .+ b[:, REP_X:REP_Y] .+ b[:, DIR_X:DIR_Y] .+ b[:, ADV_X:ADV_Y]
+    b[:, RES_X:RES_Y] = b[:, COH_X:COH_Y] .+ b[:, GAP_X:GAP_Y] .+ b[:, REP_X:REP_Y] .+ b[:, DIR_X:DIR_Y] .+ b[:, ROT_X:ROT_Y]
 
     # either scale or normalise resultant
     if gain === nothing
@@ -275,6 +251,7 @@ function compute_step(b; scaling = "linear", exp_rate = 0.2, speed = 0.05, stabi
         # scale by the gain
         b[:, RES_X:RES_Y] .*= gain
     end
+
     return xv, yv, mag, p
 end
 
@@ -309,58 +286,10 @@ function load_swarm(path = "swarm.json")
 end
 
 function run_simulation_for_n_steps(b, parameters, n_steps=2000)
-    for i in 1:n_steps
+    for _ in 1:n_steps
         compute_step(b; parameters...)
         apply_step(b)
     end
 end
 
-function normalize(mnx2)
-    n = size(mnx2)[1]
-    nd = Array{Float64, 2}(undef, (n,2)) 
-    for i in 1:n
-        m = sqrt(mnx2[i,1] ^ 2 + mnx2[i,2] ^ 2)
-        if m > 0
-            nd[i,1] = mnx2[i,1] / m
-            nd[i,2] = mnx2[i,2] / m
-        else
-            nd[i,1] = 0.0
-            nd[i, 2] = 0.0
-        end
-    end
-    return nd
-end
-
-# function normalize!(mnx2)
-#     n = size(mnx2)[1]
-#     for i in 1:n
-#         m = sqrt(mnx2[i,1] ^ 2 + mnx2[i,2] ^ 2)
-#         if m > 0
-#             mnx2[i,1] = mnx2[i,1] / m
-#             mnx2[i,2] = mnx2[i,2] / m
-#         else
-#             mnx2[i,1] = 0.0
-#             mnx2[i, 2] = 0.0
-#         end
-#     end
-# end
-#
-# function safe_unit(v)
-#     m = hypot(v[1], v[2])
-#     if m > 0.0
-#         return v ./ m
-#     else
-#         return [0.0, 0.0]
-#     end
-# end
-
-# function safe_unit(v)
-#     # m = hypot(v[1], v[2])
-#     m = sqrt.(v[1] .^ 2 .+ v[2] .^ 2)
-#     if m > 1.0
-#         return v ./ m
-#     else
-#         return v
-#     end
-# end
 end # module
